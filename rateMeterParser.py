@@ -7,6 +7,8 @@ from argparse import ArgumentParser
 import glob
 import os
 import sys
+import numpy as np
+import math
 
 args = ArgumentParser('./rateMeterParser.py', description='''This script is designed to take an output file from the RateMeter and output a csv file
 with the average rate per minute.
@@ -69,18 +71,45 @@ first_two_rows = dataframe[['Time (sec)', 'rate']]
 first_two_rows = first_two_rows.set_index('Time (sec)')
 first_two_rows.to_csv(output_prefix+'_Per_Ten_Seconds.csv')
 
-df = dataframe.rolling(6).mean()
-df = df.iloc[::6, :]
+# Now I want to get the average, standard deviation and standard error per minute
 # The first line will be NaN because it combines the first time (time 0) with 5 non-existent lines.
-# That line will be removed later, but it works well for combining only times 10s-60s and not 0s-50s
 
-def get_minute(df):
-	index = df.name
-	minute = index/6
-	df['Minute'] = minute
-	return df
+df = dataframe[dataframe.index > 0]
+# Now use this and loop through each six values
+minute = 1
+i = 0
+results = []
+rates = []
+for rate in df['rate'].values:
+	if i < 6:
+		rates.append(float(rate))
+		i += 1
+	elif i == 6:
+		avg = np.mean(rates)
+		stdev = np.std(rates)
+		stderr = stdev/(math.sqrt(6))
 
-df = df.apply(get_minute, axis = 1)
-df = df[df['Minute'] > 0]
-df = df[['Minute', 'rate']].set_index('Minute')
-df.to_csv(output_prefix+'_Per_Minute.csv')
+		tmp_dict = {'Minute': minute,
+			'Average': avg,
+			'Standard Deviation': stdev,
+			'Standard Error (Error Bar)': stderr}
+		results.append(tmp_dict)
+		minute += 1
+		rates = [float(rate)]
+		i = 1
+
+# There will typically be some readings that didn't complete a the i ==6 part of the loop
+if len(rates) > 0:
+	avg = np.mean(rates)
+	stdev = np.std(rates)
+	stderr = stdev/(math.sqrt(len(rates)))
+	tmp_dict = {'Minute': minute,
+		'Average': avg,
+		'Standard Deviation': stdev,
+		'Standard Error (Error Bar)': stderr}
+	results.append(tmp_dict)
+
+# Now put it into a dataframe and save it
+minutes_df = pd.DataFrame(results)
+minutes_df = minutes_df.set_index('Minute')
+minutes_df.to_csv(output_prefix+'_Per_Minute.csv')
